@@ -4,6 +4,8 @@ import ELFSage
 import LeanRV64DLEAN
 import LeanRV64DLEAN.Sail.Sail
 
+open Register
+
 def readElf32 (elfFilepath : System.FilePath) : IO (Except String ELF32File) := do
   let bytes <- IO.FS.readBinFile elfFilepath
   match mkRawELFFile? bytes with
@@ -45,7 +47,7 @@ def initializeMemory (_size: MachineBits) (elf : ELF32File) : Std.HashMap Nat (B
 
   let update_mem_segment mem first_addr body :=
     let addrs := Array.range' first_addr (Array.size body)
-    Array.foldl (λ mem (addr, byte) => 
+    Array.foldl (λ mem (addr, byte) =>
       if mem.contains addr then
         panic s!"Address {addr} is already written to!"
       else
@@ -53,7 +55,7 @@ def initializeMemory (_size: MachineBits) (elf : ELF32File) : Std.HashMap Nat (B
     ) mem (Array.zip addrs body)
 
   -- Handle interpreted_segments
-  let mem'' := List.foldl (λ mem (_header, inst) => 
+  let mem'' := List.foldl (λ mem (_header, inst) =>
           -- TODO(JP): Is this address correct?
           update_mem_segment mem inst.segment_base inst.segment_body.data
         ) default elf.interpreted_segments
@@ -70,9 +72,11 @@ def initializeMemory (_size: MachineBits) (elf : ELF32File) : Std.HashMap Nat (B
 
   mem
 
-def initializeRegisters : Std.DHashMap Register RegisterType :=
+def initializeRegisters (elf: ELF32File) : Std.DHashMap Register RegisterType :=
   -- TODO: initialize register properly
-  Std.DHashMap.empty
+  let emptyRegs := Std.DHashMap.empty
+  let regs := emptyRegs.insert PC (elf.file_header.e_entry:UInt32).toBitVec -- this needs to be a BV64
+  regs
 
 def my_main (_ : PUnit) :=
   open LeanRV64DLEAN.Functions in
@@ -89,9 +93,7 @@ def runElf32 (elf : ELF32File) : IO UInt32 :=
   open Sail in
   open LeanRV64DLEAN.Functions in
   let mem := initializeMemory MachineBits.B32 elf
-  let regs := initializeRegisters
+  let regs := initializeRegisters elf
   let initialState := ⟨regs, (), mem, default, default, default⟩
   main_of_sail_main initialState (sail_model_init >=> my_main)
   -- main_of_sail_main initialState my_main
-  
-
